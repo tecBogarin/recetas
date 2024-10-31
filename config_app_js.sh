@@ -6,6 +6,11 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
+if [ -z "$2" ]; then
+  echo "Uso: $0 <version_node>  <URL del proyecto ReactJS>"
+  exit 1
+fi
+
 # Verificar si curl está instalado
 if ! command -v curl > /dev/null; then
   echo "Error: curl no está instalado. Instalándo"
@@ -47,11 +52,23 @@ NODE_VERSION=$1
 
 # Instalar NVM
 echo "Instalando NVM..."
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.4/install.sh | bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 
 # Cargar NVM
 export NVM_DIR="$([ -z "${XDG_CONFIG_HOME-}" ] && printf %s "${HOME}/.nvm" || printf %s "${XDG_CONFIG_HOME}/nvm")"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" # Esto carga nvm
+
+# 4. Añadir las líneas de configuración de nvm al archivo .bashrc si no existen
+if ! grep -q 'export NVM_DIR="$HOME/.nvm"' "$HOME/.bashrc"; then
+    echo_message "Configurando nvm en ~/.bashrc..."
+    echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.bashrc
+    echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" # Esto carga nvm' >> ~/.bashrc
+    echo '[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion" # Esto carga nvm bash_completion' >> ~/.bashrc
+fi
+
+# 5. Recargar ~/.bashrc para aplicar los cambios en la sesión actual
+echo_message "Recargando ~/.bashrc..."
+source ~/.bashrc
 
 # Verificar si NVM se instaló correctamente
 if ! command -v nvm > /dev/null; then
@@ -78,39 +95,76 @@ npm -v
 
 echo "Instalación completada con éxito."
 
-# Actualiza los paquetes
-echo "Actualizando el sistema..."
-sudo apt update -y
-sudo apt upgrade -y
+# Función para verificar si un paquete está instalado e instalarlo si es necesario
+check_and_install() {
+  PACKAGE=$1
+  if ! dpkg -l | grep -q "$PACKAGE"; then
+    echo "$PACKAGE no está instalado. Instalando..."
+    sudo apt update
+    sudo apt install -y "$PACKAGE"
+  else
+    echo "$PACKAGE ya está instalado."
+  fi
+}
 
-# Instalar PostgreSQL
-echo "Instalando PostgreSQL..."
-sudo apt install postgresql postgresql-contrib -y
+# Verificar e instalar wget si no está instalado
+check_and_install "wget"
 
-# Verifica que PostgreSQL esté corriendo
-echo "Habilitando y verificando que PostgreSQL está corriendo..."
-sudo systemctl enable postgresql
-sudo systemctl start postgresql
-# sudo systemctl status postgresql
+# Verificar e instalar unzip si no está instalado
+check_and_install "unzip"
 
-# Configuración básica de PostgreSQL
-echo "Configurando PostgreSQL..."
-# Cambia la contraseña del usuario 'postgres'
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'TuContraseñaSegura';"
+# Instalar Nginx si no está instalado
+check_and_install "nginx"
 
-# Obtener la versión de PostgreSQL instalada
-PG_VERSION=$(ls /etc/postgresql | sort -V | tail -n 1)
+# Crear el directorio para el proyecto si no existe
+if [ ! -d "$PROJECT_DIR" ]; then
+  sudo mkdir -p "$PROJECT_DIR"
+fi
 
-# Permitir acceso remoto editando el archivo pg_hba.conf
-echo "Configurando acceso remoto a PostgreSQL..."
-sudo bash -c "echo 'host    all             all             0.0.0.0/0            md5' >> /etc/postgresql/$PG_VERSION/main/pg_hba.conf"
-sudo bash -c "echo 'listen_addresses = '\''*'\'' ' >> /etc/postgresql/$PG_VERSION/main/postgresql.conf"
+# Descargar el proyecto React desde la URL proporcionada
+echo "Descargando el proyecto React desde: $PROJECT_URL"
+sudo wget -O /tmp/react-project.zip "$PROJECT_URL"
 
-# Reiniciar el servicio de PostgreSQL para aplicar cambios
-echo "Reiniciando PostgreSQL..."
-sudo systemctl restart postgresql
+# Descomprimir el proyecto en el directorio web
+sudo unzip /tmp/react-project.zip -d "$PROJECT_DIR"
+sudo rm /tmp/react-project.zip
 
-# Mensaje final
-echo "Instalación completada. PostgreSQL esta instalado."
-# echo "Puedes acceder a pgAdmin en: http://<tu-ip-servidor>/pgadmin4"
-echo "Recuerda usar la contraseña configurada para el usuario 'postgres'. pwd : TuContraseñaSegura"
+cd $PROJECT_DIR/pruebasReact-main
+npm install && npm run build
+
+# Configurar Nginx para servir el proyecto
+NGINX_CONF="/etc/nginx/sites-available/react-app"
+sudo bash -c "cat > $NGINX_CONF" << EOL
+server {
+    listen 80;
+    server_name _;
+
+    root $PROJECT_DIR/pruebasReact-main/dist;
+    index index.html;
+
+    location / {
+        try_files \$uri /index.html;
+    }
+}
+EOL
+
+# Eliminar el archivo simbólico si ya existe
+if [ -L /etc/nginx/sites-enabled/react-app ]; then
+  sudo rm /etc/nginx/sites-enabled/react-app
+fi
+
+# Crear el enlace simbólico
+sudo ln -s /etc/nginx/sites-available/react-app /etc/nginx/sites-enabled/
+
+# Deshabilitar la configuración por defecto de Nginx para evitar conflictos
+if [ -f /etc/nginx/sites-enabled/default ]; then
+  sudo rm /etc/nginx/sites-enabled/default
+fi
+
+# Verificar la configuración de Nginx
+sudo nginx -t
+
+# Reiniciar Nginx para aplicar la nueva configuración
+sudo systemctl restart nginx
+
+echo "Instalación completada. El proyecto ReactJS está siendo servido por Nginx."

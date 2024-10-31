@@ -1,0 +1,12 @@
+
+3 descargar el proyecto comprimido en .zip
+4 renombrar el .zip
+5 descomprimir
+6 nos rasladamos a la carpeta descomprimida
+7 pregunar por le archivo package.json posicion actual
+8 instalar las depedencias
+9 hacer publicacion
+10 trasladar la carpeta dist en nginx
+11 reiniciar nginx
+
+https://codeload.github.com/tecBogarin/pruebasReact/zip/refs/heads/main
